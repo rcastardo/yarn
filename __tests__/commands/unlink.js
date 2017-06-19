@@ -25,7 +25,7 @@ const runUnlink = buildRun.bind(
   ConsoleReporter,
   fixturesLoc,
   (args, flags, config, reporter): CLIFunctionReturn => {
-    return unlink(config, reporter, flags, args);
+    return link(config, reporter, flags, args).then(unlink.bind(null, config, reporter, flags, args));
   },
 );
 
@@ -35,12 +35,12 @@ test.concurrent('creates folder in linkFolder', async (): Promise<void> => {
   await runLink([], {linkFolder}, 'package-with-name', async (config, reporter): Promise<void> => {
     const existed = await fs.exists(path.join(linkFolder, 'a-package'));
     expect(existed).toEqual(true);
-  });
-
-  await runUnlink([], {linkFolder}, 'package-with-name', async (config, reporter): Promise<void> => {
-    const existed = await fs.exists(path.join(linkFolder, 'a-package'));
-    expect(existed).toEqual(false);
-  });
+  }).then(
+    runUnlink.bind(null, [], {linkFolder}, 'package-with-name', async (config, reporter): Promise<void> => {
+      const existed = await fs.exists(path.join(linkFolder, 'a-package'));
+      expect(existed).toEqual(false);
+    }),
+  );
 });
 
 test.concurrent('throws error if package.json does not have name', async (): Promise<void> => {
