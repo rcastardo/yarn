@@ -41,7 +41,7 @@ matrix:
   include:
     - os: osx
       node_js: "6"
-      env: TEST_TYPE="test-ci"
+      env: TEST_TYPE="test-ci -- -- --setupTestFrameworkScriptFile=./scripts/heap-size.js"
 
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./scripts/bootstrap-env-ubuntu.sh; fi
@@ -58,4 +58,4 @@ before_install:
 os:
   - linux
 
-script: node --max_old_space_size=4096 $(which yarn).js $TEST_TYPE -- -- --runInBand;
+script: travis_retry yarn $TEST_TYPE
