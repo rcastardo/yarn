@@ -58,4 +58,4 @@ before_install:
 os:
   - linux
 
-script: alias yarn="node --max_old_space_size=4096 $(which yarn).js"; yarn $TEST_TYPE;
+script: node --max_old_space_size=4096 $(which yarn).js $TEST_TYPE;
