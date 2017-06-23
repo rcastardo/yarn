@@ -53,10 +53,9 @@ before_install:
       export TMPDIR="/tmp/ramfs";
       mkdir -p $TMPDIR;
       mount -t hfs -o nobrowse $RAMDISK $TMPDIR;
-      alias yarn="node --max_old_space_size=4096 $(which yarn).js";
     fi
 
 os:
   - linux
 
-script: yarn $TEST_TYPE
+script: alias yarn="node --max_old_space_size=4096 $(which yarn).js"; yarn $TEST_TYPE;
