@@ -13,11 +13,11 @@ export const requireLockfile = true;
 
 export function setFlags(commander: Object) {
   commander.usage('upgrade-interactive');
-  commander.option('-E, --exact', 'install exact version');
-  commander.option('-T, --tilde', 'install most recent release with the same minor version');
+  commander.option('-E, --exact', 'upgrade to most recent release with exact version');
+  commander.option('-T, --tilde', 'upgrade to most recent release with patch version');
 }
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object, args: Array<string>): boolean {
   return true;
 }
 
@@ -88,6 +88,10 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
   );
 
   try {
+    const red = reporter.format.red('<red>');
+    const yellow = reporter.format.yellow('<yellow>');
+    reporter.info(reporter.lang('legendColorsForUpgradeInteractive', red, yellow));
+
     const answers: Array<Dependency> = await reporter.prompt('Choose which packages to update.', choices, {
       name: 'packages',
       type: 'checkbox',

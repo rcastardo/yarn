@@ -147,7 +147,7 @@ export function getParent(key: string, treesByKey: Object): Object {
   return treesByKey[parentKey];
 }
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object, args: Array<string>): boolean {
   return true;
 }
 
@@ -175,7 +175,7 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
   const lockfile = await Lockfile.fromDirectory(config.lockfileFolder, reporter);
   const install = new Install(flags, config, reporter, lockfile);
   const {requests: depRequests, patterns} = await install.fetchRequestFromCwd();
-  await install.resolver.init(depRequests, install.flags.flat);
+  await install.resolver.init(depRequests, {isFlat: install.flags.flat, isFrozen: install.flags.frozenLockfile});
 
   const opts: ListOptions = {
     reqDepth: getReqDepth(flags.depth),

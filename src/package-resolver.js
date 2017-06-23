@@ -10,9 +10,16 @@ import RequestManager from './util/request-manager.js';
 import BlockingQueue from './util/blocking-queue.js';
 import Lockfile from './lockfile/wrapper.js';
 import map from './util/map.js';
+import WorkspaceLayout from './workspace-layout.js';
 
 const invariant = require('invariant');
 const semver = require('semver');
+
+export type ResolverOptions = {|
+  isFlat?: boolean,
+  isFrozen?: boolean,
+  workspaceLayout?: WorkspaceLayout,
+|};
 
 export default class PackageResolver {
   constructor(config: Config, lockfile: Lockfile) {
@@ -31,6 +38,10 @@ export default class PackageResolver {
 
   // whether the dependency graph will be flattened
   flat: boolean;
+
+  frozen: boolean;
+
+  workspaceLayout: ?WorkspaceLayout;
 
   // list of registries that have been used in this resolution
   usedRegistries: Set<RegistryNames>;
@@ -445,17 +456,25 @@ export default class PackageResolver {
     }
 
     const request = new PackageRequest(req, this);
-    await request.find(fresh);
+    await request.find({fresh, frozen: this.frozen});
   }
 
   /**
    * TODO description
    */
 
-  async init(deps: DependencyRequestPatterns, isFlat: boolean): Promise<void> {
-    this.flat = isFlat;
+  async init(
+    deps: DependencyRequestPatterns,
+    {isFlat, isFrozen, workspaceLayout}: ResolverOptions = {isFlat: false, isFrozen: false, workspaceLayout: undefined},
+  ): Promise<void> {
+    this.flat = Boolean(isFlat);
+    this.frozen = Boolean(isFrozen);
+    this.workspaceLayout = workspaceLayout;
     const activity = (this.activity = this.reporter.activity());
-    await Promise.all(deps.map((req): Promise<void> => this.find(req)));
+
+    for (const req of deps) {
+      await this.find(req);
+    }
 
     // all required package versions have been discovered, so now packages that
     // resolved to existing versions can be resolved to their best available version

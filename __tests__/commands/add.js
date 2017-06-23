@@ -42,7 +42,7 @@ const runAdd = buildRun.bind(
   },
 );
 
-test.concurrent('adds any new package to the current workspace, but install from the worktree', async () => {
+test.concurrent('adds any new package to the current workspace, but install from the workspace', async () => {
   await runInstall({}, 'simple-worktree', async (config): Promise<void> => {
     const inOut = new stream.PassThrough();
     const reporter = new reporters.JSONReporter({stdout: inOut});
@@ -818,4 +818,16 @@ test.concurrent('should retain build artifacts after add', (): Promise<void> => 
     {},
     'retain-build-artifacts-after-add',
   );
+});
+
+test.concurrent('installing with --pure-lockfile and then adding should keep build artifacts', (): Promise<void> => {
+  const fixture = 'integrity-pure-lockfile';
+
+  return runInstall({pureLockfile: true}, path.join('..', 'add', fixture), async (config, reporter): Promise<void> => {
+    expect(await fs.exists(path.join(config.cwd, 'node_modules', '.yarn-integrity'))).toBe(true);
+    expect(await fs.exists(path.join(config.cwd, 'node_modules', 'package-a', 'temp.txt'))).toBe(true);
+    const add = new Add(['left-pad@1.1.0'], {}, config, reporter, (await Lockfile.fromDirectory(config.cwd)));
+    await add.init();
+    expect(await fs.exists(path.join(config.cwd, 'node_modules', 'package-a', 'temp.txt'))).toBe(true);
+  });
 });

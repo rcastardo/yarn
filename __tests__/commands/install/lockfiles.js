@@ -71,6 +71,20 @@ test.concurrent("throws an error if existing lockfile isn't satisfied with --fro
   expect(thrown).toEqual(true);
 });
 
+test.concurrent(
+  "doesn't write new lockfile if existing one satisfied but not fully optimized with --frozen-lockfile",
+  (): Promise<void> => {
+    return runInstall(
+      {frozenLockfile: true},
+      'install-should-not-write-lockfile-if-not-optimized-and-frozen',
+      async (config): Promise<void> => {
+        const lockfile = await fs.readFile(path.join(config.cwd, 'yarn.lock'));
+        expect(lockfile.indexOf('left-pad@1.1.3:')).toBeGreaterThanOrEqual(0);
+      },
+    );
+  },
+);
+
 test.concurrent('install transitive optional dependency from lockfile', (): Promise<void> => {
   return runInstall({}, 'install-optional-dep-from-lockfile', (config, reporter, install) => {
     expect(install && install.resolver && install.resolver.patterns['fsevents@^1.0.0']).toBeTruthy();
@@ -159,7 +173,7 @@ test.concurrent('install should write and read integrity file based on lockfile 
     }
     expect(allCorrect).toBe(true);
     // install should bail out with integrity check
-    await fs.unlink(path.join(config.cwd, 'node_modules', 'mime-types', 'package.json'));
+    await fs.unlink(path.join(config.cwd, 'node_modules', 'mime-types'));
     const reinstall = new Install({}, config, reporter, (await Lockfile.fromDirectory(config.cwd)));
     await reinstall.init();
 

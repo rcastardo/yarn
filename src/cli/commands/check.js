@@ -15,7 +15,7 @@ const path = require('path');
 export const requireLockfile = false;
 export const noArguments = true;
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object): boolean {
   return true;
 }
 
@@ -92,6 +92,9 @@ export async function verifyTreeCheck(
       reportError('packageNotInstalled', `${dep.originalKey}`);
       continue;
     }
+    if (!await fs.exists(path.join(manifestLoc, 'package.json'))) {
+      continue;
+    }
     const pkg = await config.readManifest(manifestLoc, registryName);
     if (
       semver.validRange(dep.version, config.looseSemver) &&
@@ -165,9 +168,9 @@ async function integrityHashCheck(
   const install = new Install(flags, config, reporter, lockfile);
 
   // get patterns that are installed when running `yarn install`
-  const {patterns} = await install.fetchRequestFromCwd();
+  const {patterns, workspaceLayout} = await install.fetchRequestFromCwd();
 
-  const match = await integrityChecker.check(patterns, lockfile.cache, flags);
+  const match = await integrityChecker.check(patterns, lockfile.cache, flags, workspaceLayout);
   for (const pattern of match.missingPatterns) {
     reportError('lockfileNotContainPattern', pattern);
   }
@@ -220,12 +223,12 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
   }
 
   // get patterns that are installed when running `yarn install`
-  const {patterns: rawPatterns} = await install.hydrate(true);
+  const {patterns: rawPatterns, workspaceLayout} = await install.hydrate();
   const patterns = await install.flatten(rawPatterns);
 
   // check if patterns exist in lockfile
   for (const pattern of patterns) {
-    if (!lockfile.getLocked(pattern)) {
+    if (!lockfile.getLocked(pattern) && (!workspaceLayout || !workspaceLayout.getManifestByPattern(pattern))) {
       reportError('lockfileNotContainPattern', pattern);
     }
   }
@@ -266,13 +269,13 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
 
     // skip unnecessary checks for linked dependencies
     const remoteType = pkg._reference.remote.type;
-    const isLinkedDepencency = remoteType === 'link' || (remoteType === 'file' && config.linkFileDependencies);
+    const isLinkedDepencency =
+      remoteType === 'link' || remoteType === 'workspace' || (remoteType === 'file' && config.linkFileDependencies);
     if (isLinkedDepencency) {
       continue;
     }
 
-    const pkgLoc = path.join(loc, 'package.json');
-    if (!await fs.exists(loc) || !await fs.exists(pkgLoc)) {
+    if (!await fs.exists(loc)) {
       if (pkg._reference.optional) {
         reporter.warn(reporter.lang('optionalDepNotInstalled', human));
       } else {
@@ -281,89 +284,93 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
       continue;
     }
 
-    const packageJson = await config.readJson(pkgLoc);
-    if (pkg.version !== packageJson.version) {
-      // node_modules contains wrong version
-      reportError('packageWrongVersion', human, pkg.version, packageJson.version);
-    }
+    const pkgLoc = path.join(loc, 'package.json');
 
-    const deps = Object.assign({}, packageJson.dependencies, packageJson.peerDependencies);
-    bundledDeps[packageJson.name] = packageJson.bundledDependencies || [];
-
-    for (const name in deps) {
-      const range = deps[name];
-      if (!semver.validRange(range, config.looseSemver)) {
-        continue; // exotic
+    if (await fs.exists(pkgLoc)) {
+      const packageJson = await config.readJson(pkgLoc);
+      if (pkg.version !== packageJson.version) {
+        // node_modules contains wrong version
+        reportError('packageWrongVersion', human, pkg.version, packageJson.version);
       }
 
-      const subHuman = `${human}#${name}@${range}`;
+      const deps = Object.assign({}, packageJson.dependencies, packageJson.peerDependencies);
+      bundledDeps[packageJson.name] = packageJson.bundledDependencies || [];
 
-      // find the package that this will resolve to, factoring in hoisting
-      const possibles = [];
-      let depPkgLoc;
-      for (let i = parts.length; i >= 0; i--) {
-        const myParts = parts.slice(0, i).concat(name);
-
-        // build package.json location for this position
-        const myDepPkgLoc = path.join(
-          config.cwd,
-          'node_modules',
-          myParts.join(`${path.sep}node_modules${path.sep}`),
-          'package.json',
-        );
-
-        possibles.push(myDepPkgLoc);
-      }
-      while (possibles.length) {
-        const myDepPkgLoc = possibles.shift();
-        if (await fs.exists(myDepPkgLoc)) {
-          depPkgLoc = myDepPkgLoc;
-          break;
+      for (const name in deps) {
+        const range = deps[name];
+        if (!semver.validRange(range, config.looseSemver)) {
+          continue; // exotic
         }
-      }
-      if (!depPkgLoc) {
-        // we'll hit the module not install error above when this module is hit
-        continue;
-      }
 
-      //
-      const depPkg = await config.readJson(depPkgLoc);
-      const foundHuman = `${humaniseLocation(path.dirname(depPkgLoc)).join('#')}@${depPkg.version}`;
-      if (!semver.satisfies(depPkg.version, range, config.looseSemver)) {
-        // module isn't correct semver
-        reportError('packageDontSatisfy', subHuman, foundHuman);
-        continue;
-      }
+        const subHuman = `${human}#${name}@${range}`;
 
-      // check for modules above us that this could be deduped to
-      for (const loc of possibles) {
-        if (!await fs.exists(loc)) {
+        // find the package that this will resolve to, factoring in hoisting
+        const possibles = [];
+        let depLoc;
+        for (let i = parts.length; i >= 0; i--) {
+          const myParts = parts.slice(0, i).concat(name);
+
+          // build package.json location for this position
+          const myDepPkgLoc = path.join(config.cwd, 'node_modules', myParts.join(`${path.sep}node_modules${path.sep}`));
+
+          possibles.push(myDepPkgLoc);
+        }
+        while (possibles.length) {
+          const myDepPkgLoc = possibles.shift();
+          if (await fs.exists(myDepPkgLoc)) {
+            depLoc = myDepPkgLoc;
+            break;
+          }
+        }
+        if (!depLoc) {
+          // we'll hit the module not install error above when this module is hit
           continue;
         }
 
-        const packageJson = await config.readJson(loc);
-        const packagePath = originalKey.split('#');
-        const rootDep = packagePath[0];
-        const packageName = packagePath[1] || packageJson.name;
+        const depPkgLoc = path.join(depLoc, 'package.json');
 
-        const bundledDep = bundledDeps[rootDep] && bundledDeps[rootDep].includes(packageName);
-        if (
-          !bundledDep &&
-          (packageJson.version === depPkg.version ||
-            (semver.satisfies(packageJson.version, range, config.looseSemver) &&
-              semver.gt(packageJson.version, depPkg.version, config.looseSemver)))
-        ) {
-          reporter.warn(
-            reporter.lang(
-              'couldBeDeduped',
-              subHuman,
-              packageJson.version,
-              `${humaniseLocation(path.dirname(loc)).join('#')}@${packageJson.version}`,
-            ),
-          );
-          warningCount++;
+        if (await fs.exists(depPkgLoc)) {
+          const depPkg = await config.readJson(depPkgLoc);
+          const foundHuman = `${humaniseLocation(path.dirname(depPkgLoc)).join('#')}@${depPkg.version}`;
+          if (!semver.satisfies(depPkg.version, range, config.looseSemver)) {
+            // module isn't correct semver
+            reportError('packageDontSatisfy', subHuman, foundHuman);
+            continue;
+          }
+
+          // check for modules above us that this could be deduped to
+          for (const loc of possibles) {
+            const locPkg = path.join(loc, 'package.json');
+
+            if (!await fs.exists(locPkg)) {
+              continue;
+            }
+
+            const packageJson = await config.readJson(locPkg);
+            const packagePath = originalKey.split('#');
+            const rootDep = packagePath[0];
+            const packageName = packagePath[1] || packageJson.name;
+
+            const bundledDep = bundledDeps[rootDep] && bundledDeps[rootDep].indexOf(packageName) !== -1;
+            if (
+              !bundledDep &&
+              (packageJson.version === depPkg.version ||
+                (semver.satisfies(packageJson.version, range, config.looseSemver) &&
+                  semver.gt(packageJson.version, depPkg.version, config.looseSemver)))
+            ) {
+              reporter.warn(
+                reporter.lang(
+                  'couldBeDeduped',
+                  subHuman,
+                  packageJson.version,
+                  `${humaniseLocation(path.dirname(locPkg)).join('#')}@${packageJson.version}`,
+                ),
+              );
+              warningCount++;
+            }
+            break;
+          }
         }
-        break;
       }
     }
   }

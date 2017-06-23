@@ -61,6 +61,22 @@ test.concurrent('properly find and save build artifacts', async () => {
   });
 });
 
+test('creates the file in the mirror when fetching a git repository', async () => {
+  await runInstall({}, 'install-git', async (config, reporter): Promise<void> => {
+    const lockfile = await Lockfile.fromDirectory(config.cwd);
+
+    expect(await fs.glob('example-yarn-package.git-*', {cwd: `${config.cwd}/offline-mirror`})).toHaveLength(1);
+
+    await fs.unlink(path.join(config.cwd, 'offline-mirror'));
+    await fs.unlink(path.join(config.cwd, 'node_modules'));
+
+    const firstReinstall = new Install({}, config, reporter, lockfile);
+    await firstReinstall.init();
+
+    expect(await fs.glob('example-yarn-package.git-*', {cwd: `${config.cwd}/offline-mirror`})).toHaveLength(1);
+  });
+});
+
 test.concurrent('creates a symlink to a directory when using the link: protocol', async () => {
   await runInstall({}, 'install-link', async (config): Promise<void> => {
     const expectPath = path.join(config.cwd, 'node_modules', 'test-absolute');
@@ -310,6 +326,12 @@ test.concurrent('install file: local packages with local dependencies', async ()
   });
 });
 
+test.concurrent('install file: install without manifest of dependency', async (): Promise<void> => {
+  await runInstall({}, 'install-file-without-manifest', async (config, reporter) => {
+    expect(await fs.readFile(path.join(config.cwd, 'node_modules', 'foo', 'index.js'))).toEqual('bar\n');
+  });
+});
+
 test.concurrent('install file: link file dependencies', async (): Promise<void> => {
   await runInstall({}, 'install-file-link-dependencies', async (config, reporter) => {
     const statA = await fs.lstat(path.join(config.cwd, 'node_modules', 'a'));
@@ -456,7 +478,6 @@ test.concurrent('install should be idempotent', (): Promise<void> => {
       expect(await getPackageVersion(config, 'dep-a')).toEqual('1.0.0');
     },
     null,
-    false,
   );
 
   return runInstall({}, 'install-should-be-idempotent', async (config, reporter) => {
@@ -799,15 +820,10 @@ test.concurrent('prunes the offline mirror tarballs after pruning is enabled', (
 test.concurrent('scoped packages remain in offline mirror after pruning is enabled', (): Promise<void> => {
   return runInstall({}, 'prune-offline-mirror-scoped', async (config): Promise<void> => {
     const mirrorPath = 'mirror-for-offline';
-    // Ensure that scoped packages remain mangled and resolvable
-    expect(await fs.exists(path.join(config.cwd, `${mirrorPath}/@fakescope-fake-dependency-1.0.1.tgz`))).toEqual(
-      true,
-      'scoped package exists',
-    );
-    expect(await fs.exists(path.join(config.cwd, `${mirrorPath}/fake-dependency-1.0.1.tgz`))).toEqual(
-      true,
-      'unscoped package exists',
-    );
+    // scoped package exists
+    expect(await fs.exists(path.join(config.cwd, `${mirrorPath}/@fakescope-fake-dependency-1.0.1.tgz`))).toEqual(true);
+    // unscoped package exists
+    expect(await fs.exists(path.join(config.cwd, `${mirrorPath}/fake-dependency-1.0.1.tgz`))).toEqual(true);
   });
 });
 

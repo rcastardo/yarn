@@ -13,6 +13,7 @@ import {MessageError} from './errors.js';
 import {entries} from './util/misc.js';
 import * as constants from './constants.js';
 import * as versionUtil from './util/version.js';
+import WorkspaceResolver from './resolvers/contextual/workspace-resolver.js';
 import * as resolvers from './resolvers/index.js';
 import * as fs from './util/fs.js';
 
@@ -108,6 +109,7 @@ export default class PackageRequest {
     const {range, name} = await this.normalize(pattern);
 
     const exoticResolver = PackageRequest.getExoticResolver(range);
+
     if (exoticResolver) {
       let data = await this.findExoticVersionInfo(exoticResolver, range);
 
@@ -219,8 +221,13 @@ export default class PackageRequest {
 
   findVersionInfo(): Promise<Manifest> {
     const exoticResolver = PackageRequest.getExoticResolver(this.pattern);
+
     if (exoticResolver) {
       return this.findExoticVersionInfo(exoticResolver, this.pattern);
+    } else if (WorkspaceResolver.isWorkspace(this.pattern, this.resolver.workspaceLayout)) {
+      invariant(this.resolver.workspaceLayout, 'expected workspaceLayout');
+      const resolver = new WorkspaceResolver(this, this.pattern, this.resolver.workspaceLayout);
+      return resolver.resolve();
     } else {
       return this.findVersionOnRegistry(this.pattern);
     }
@@ -249,13 +256,9 @@ export default class PackageRequest {
   /**
    * TODO description
    */
-  async find(fresh: boolean): Promise<void> {
+  async find({fresh, frozen}: {fresh: boolean, frozen?: boolean}): Promise<void> {
     // find version info for this package pattern
-    const info: ?Manifest = await this.findVersionInfo();
-
-    if (!info) {
-      throw new MessageError(this.reporter.lang('unknownPackage', this.pattern));
-    }
+    const info: Manifest = await this.findVersionInfo();
 
     info.fresh = fresh;
     cleanDependencies(info, false, this.reporter, () => {
@@ -265,7 +268,9 @@ export default class PackageRequest {
     // check if while we were resolving this dep we've already resolved one that satisfies
     // the same range
     const {range, name} = PackageRequest.normalizePattern(this.pattern);
-    const resolved: ?Manifest = this.resolver.getHighestRangeVersionMatch(name, range);
+    const resolved: ?Manifest = frozen
+      ? this.resolver.getExactVersionMatch(name, range)
+      : this.resolver.getHighestRangeVersionMatch(name, range);
     if (resolved) {
       this.resolver.reportPackageWithExistingVersion(this, info);
       return;
@@ -286,6 +291,7 @@ export default class PackageRequest {
     const ref = new PackageReference(this, info, remote);
     ref.addPattern(this.pattern, info);
     ref.addOptional(this.optional);
+    ref.setFresh(fresh);
     info._reference = ref;
     info._remote = remote;
 
@@ -321,8 +327,26 @@ export default class PackageRequest {
         }),
       );
     }
+    if (remote.type === 'workspace' && !this.config.production) {
+      // workspaces support dev dependencies
+      for (const depName in info.devDependencies) {
+        const depPattern = depName + '@' + info.devDependencies[depName];
+        deps.push(depPattern);
+        promises.push(
+          this.resolver.find({
+            pattern: depPattern,
+            registry: remote.registry,
+            optional: false,
+            parentRequest: this,
+          }),
+        );
+      }
+    }
 
-    await Promise.all(promises);
+    for (const promise of promises) {
+      await promise;
+    }
+
     ref.addDependencies(deps);
 
     // Now that we have all dependencies, it's safe to propagate optional

@@ -14,7 +14,7 @@ const path = require('path');
 export const lockQueue = new BlockingQueue('fs lock');
 
 export const readFileBuffer = promisify(fs.readFile);
-export const writeFile: (path: string, data: string) => Promise<void> = promisify(fs.writeFile);
+export const writeFile: (path: string, data: string, options?: Object) => Promise<void> = promisify(fs.writeFile);
 export const readlink: (path: string, opts: void) => Promise<string> = promisify(fs.readlink);
 export const realpath: (path: string, opts: void) => Promise<string> = promisify(fs.realpath);
 export const readdir: (path: string, opts: void) => Promise<Array<string>> = promisify(fs.readdir);
@@ -26,8 +26,8 @@ export const mkdirp: (path: string) => Promise<void> = promisify(require('mkdirp
 export const exists: (path: string) => Promise<boolean> = promisify(fs.exists, true);
 export const lstat: (path: string) => Promise<fs.Stats> = promisify(fs.lstat);
 export const chmod: (path: string, mode: number | string) => Promise<void> = promisify(fs.chmod);
-export const link: (path: string) => Promise<fs.Stats> = promisify(fs.link);
-export const glob: (path: string) => Promise<Array<string>> = promisify(globModule);
+export const link: (src: string, dst: string) => Promise<fs.Stats> = promisify(fs.link);
+export const glob: (path: string, options?: Object) => Promise<Array<string>> = promisify(globModule);
 
 const CONCURRENT_QUEUE_ITEMS = 4;
 
@@ -165,7 +165,7 @@ async function buildActionsForCopy(
     const onDone = data.onDone || noop;
     files.add(dest);
 
-    if (type === 'link') {
+    if (type === 'symlink') {
       await mkdirp(path.dirname(dest));
       onFresh();
       actions.push({
@@ -520,39 +520,32 @@ export async function copyBulk(
       }
 
       const cleanup = () => delete currentlyWriting[data.dest];
-      return (currentlyWriting[data.dest] = new Promise((resolve, reject) => {
-        const readStream = fs.createReadStream(data.src);
-        const writeStream = fs.createWriteStream(data.dest, {mode: data.mode});
-
-        reporter.verbose(reporter.lang('verboseFileCopy', data.src, data.dest));
-
-        readStream.on('error', reject);
-        writeStream.on('error', reject);
-
-        writeStream.on('open', function() {
-          readStream.pipe(writeStream);
-        });
-
-        writeStream.once('close', function() {
-          fs.utimes(data.dest, data.atime, data.mtime, function(err) {
-            if (err) {
-              reject(err);
-            } else {
-              events.onProgress(data.dest);
-              cleanup();
-              resolve();
-            }
-          });
-        });
-      })
-        .then(arg => {
-          cleanup();
-          return arg;
+      reporter.verbose(reporter.lang('verboseFileCopy', data.src, data.dest));
+      return (currentlyWriting[data.dest] = readFileBuffer(data.src)
+        .then(d => {
+          return writeFile(data.dest, d, {mode: data.mode});
         })
-        .catch(arg => {
-          cleanup();
-          throw arg;
-        }));
+        .then(() => {
+          return new Promise((resolve, reject) => {
+            fs.utimes(data.dest, data.atime, data.mtime, err => {
+              if (err) {
+                reject(err);
+              } else {
+                resolve();
+              }
+            });
+          });
+        })
+        .then(
+          () => {
+            events.onProgress(data.dest);
+            cleanup();
+          },
+          err => {
+            cleanup();
+            throw err;
+          },
+        ));
     },
     CONCURRENT_QUEUE_ITEMS,
   );

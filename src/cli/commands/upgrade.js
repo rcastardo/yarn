@@ -11,16 +11,18 @@ export function setFlags(commander: Object) {
   // TODO: support some flags that install command has
   commander.usage('upgrade [flags]');
   commander.option('-S, --scope <scope>', 'upgrade packages under the specified scope');
+  commander.option('--latest', 'upgrade packages to the latest version, ignoring version ranges in package.json');
 }
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object, args: Array<string>): boolean {
   return true;
 }
 
 export const requireLockfile = true;
 
 export async function run(config: Config, reporter: Reporter, flags: Object, args: Array<string>): Promise<void> {
-  const lockfile = args.length ? await Lockfile.fromDirectory(config.lockfileFolder, reporter) : new Lockfile();
+  const useLockfile = args.length || flags.latest;
+  const lockfile = useLockfile ? await Lockfile.fromDirectory(config.lockfileFolder, reporter) : new Lockfile();
   const {
     dependencies,
     devDependencies,
@@ -50,6 +52,8 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
     } else {
       throw new MessageError(reporter.lang('scopeNotValid'));
     }
+  } else if (flags.latest && args.length === 0) {
+    addArgs = Object.keys(allDependencies).map(dependency => getDependency(allDependencies, dependency));
   } else {
     addArgs = args.map(dependency => {
       return getDependency(allDependencies, dependency);

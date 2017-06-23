@@ -11,20 +11,14 @@ import map from '../../util/map.js';
 const leven = require('leven');
 const path = require('path');
 
-function sanitizedArgs(args: Array<string>): Array<string> {
-  const newArgs = [];
-  for (let arg of args) {
-    if (/\s/.test(arg)) {
-      arg = `"${arg}"`;
-    }
-    newArgs.push(arg);
-  }
-  return newArgs;
+// Copied from https://github.com/npm/npm/blob/63f153c743f9354376bfb9dad42bd028a320fd1f/lib/run-script.js#L175
+function joinArgs(args: Array<string>): string {
+  return args.reduce((joinedArgs, arg) => joinedArgs + ' "' + arg.replace(/"/g, '\\"') + '"', '');
 }
 
-export function setFlags() {}
+export function setFlags(commander: Object) {}
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object, args: Array<string>): boolean {
   return true;
 }
 
@@ -75,12 +69,16 @@ export async function run(config: Config, reporter: Reporter, flags: Object, arg
     }
 
     if (cmds.length) {
+      // propagate YARN_SILENT env variable to executed commands
+      process.env.YARN_SILENT = '1';
       for (const [stage, cmd] of cmds) {
         // only tack on trailing arguments for default script, ignore for pre and post - #1595
-        const defaultScriptCmd = `${cmd} ${sanitizedArgs(args).join(' ')}`;
+        const defaultScriptCmd = cmd + joinArgs(args);
         const cmdWithArgs = stage === action ? defaultScriptCmd : cmd;
         await execCommand(stage, config, cmdWithArgs, config.cwd);
       }
+    } else if (action === 'env') {
+      reporter.info(`${JSON.stringify(process.env, null, 2)}`);
     } else {
       let suggestion;
 

@@ -4,15 +4,13 @@ import type {Reporter} from '../../reporters/index.js';
 import type Config from '../../config.js';
 import type {IgnoreFilter} from '../../util/filter.js';
 import * as fs from '../../util/fs.js';
-import {sortFilter, ignoreLinesToRegex} from '../../util/filter.js';
+import {sortFilter, ignoreLinesToRegex, filterOverridenGitignores} from '../../util/filter.js';
 import {MessageError} from '../../errors.js';
 
 const zlib = require('zlib');
 const path = require('path');
 const tar = require('tar-fs');
 const fs2 = require('fs');
-
-const IGNORE_FILENAMES = ['.yarnignore', '.npmignore', '.gitignore'];
 
 const FOLDERS_IGNORE = [
   // never allow version control folders
@@ -50,7 +48,10 @@ const NEVER_IGNORE = ignoreLinesToRegex([
   '!/+(changes|changelog|history)*',
 ]);
 
-export async function pack(config: Config, dir: string): Promise<stream$Duplex> {
+export async function packTarball(
+  config: Config,
+  {mapHeader}: {mapHeader?: Object => Object} = {},
+): Promise<stream$Duplex> {
   const pkg = await config.readRootManifest();
   const {bundledDependencies, main, files: onlyFiles} = pkg;
 
@@ -84,18 +85,16 @@ export async function pack(config: Config, dir: string): Promise<stream$Duplex> 
     filters = filters.concat(regexes);
   }
 
-  //
   const files = await fs.walk(config.cwd, null, new Set(FOLDERS_IGNORE));
+  const dotIgnoreFiles = filterOverridenGitignores(files);
 
   // create ignores
-  for (const file of files) {
-    if (IGNORE_FILENAMES.indexOf(path.basename(file.relative)) >= 0) {
-      const raw = await fs.readFile(file.absolute);
-      const lines = raw.split('\n');
+  for (const file of dotIgnoreFiles) {
+    const raw = await fs.readFile(file.absolute);
+    const lines = raw.split('\n');
 
-      const regexes = ignoreLinesToRegex(lines, path.dirname(file.relative));
-      filters = filters.concat(regexes);
-    }
+    const regexes = ignoreLinesToRegex(lines, path.dirname(file.relative));
+    filters = filters.concat(regexes);
   }
 
   // files to definitely keep, takes precedence over ignore filter
@@ -127,10 +126,15 @@ export async function pack(config: Config, dir: string): Promise<stream$Duplex> 
       header.name = `package${suffix}`;
       delete header.uid;
       delete header.gid;
-      return header;
+      return mapHeader ? mapHeader(header) : header;
     },
   });
 
+  return packer;
+}
+
+export async function pack(config: Config, dir: string): Promise<stream$Duplex> {
+  const packer = await packTarball(config);
   const compressor = packer.pipe(new zlib.Gzip());
 
   return compressor;
@@ -140,7 +144,7 @@ export function setFlags(commander: Object) {
   commander.option('-f, --filename <filename>', 'filename');
 }
 
-export function hasWrapper(): boolean {
+export function hasWrapper(commander: Object, args: Array<string>): boolean {
   return true;
 }
 

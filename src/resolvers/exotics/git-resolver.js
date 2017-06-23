@@ -3,9 +3,9 @@
 import type {Manifest} from '../../types.js';
 import type PackageRequest from '../../package-request.js';
 import {hostedGit as hostedGitResolvers} from '../index.js';
-import {MessageError} from '../../errors.js';
 import * as util from '../../util/misc.js';
 import * as versionUtil from '../../util/version.js';
+import guessName from '../../util/guess-name.js';
 import {registries} from '../../registries/index.js';
 import ExoticResolver from './exotic-resolver.js';
 import Git from '../../util/git.js';
@@ -133,6 +133,18 @@ export default class GitResolver extends ExoticResolver {
       }
     }
 
-    throw new MessageError(this.reporter.lang('couldntFindManifestIn', url));
+    return {
+      // This is just the default, it can be overridden with key of dependencies
+      name: guessName(url),
+      version: '0.0.0',
+      _uid: commit,
+      _remote: {
+        resolved: `${url}#${commit}`,
+        type: 'git',
+        reference: url,
+        hash: commit,
+        registry: 'npm',
+      },
+    };
   }
 }
