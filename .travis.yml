@@ -41,7 +41,7 @@ matrix:
   include:
     - os: osx
       node_js: "6"
-      env: TEST_TYPE="test-ci -- -- --setupTestFrameworkScriptFile=./scripts/heap-size.js"
+      env: TEST_TYPE="test-ci -- -- --setupTestFrameworkScriptFile=$TRAVIS_BUILD_DIR/scripts/heap-size.js"
 
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then ./scripts/bootstrap-env-ubuntu.sh; fi
