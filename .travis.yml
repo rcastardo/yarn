@@ -53,7 +53,7 @@ before_install:
       export TMPDIR="/tmp/ramfs";
       mkdir -p $TMPDIR;
       mount -t hfs -o nobrowse $RAMDISK $TMPDIR;
-      alias yarn="travis_retry node --max_old_space_size=4096 $(which yarn).js";
+      alias yarn="node --max_old_space_size=4096 $(which yarn).js";
     fi
 
 os:
